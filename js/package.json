@@ -1,0 +1,9 @@
+{
+  "name": "crashguard-core",
+  "version": "0.1.0",
+  "description": "Crash detection core (features + model + detector) in dependency-free JavaScript",
+  "main": "crashguard-core.js",
+  "license": "MIT",
+  "scripts": { "test": "node test.js" },
+  "files": ["crashguard-core.js", "crash_model.json"]
+}

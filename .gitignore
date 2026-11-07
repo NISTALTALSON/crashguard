@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+ml/data/
+ml/train.log
+node_modules/
+.gradle/
+build/
+local.properties
+*.apk
+.idea/
+.env
