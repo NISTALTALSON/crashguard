@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "crashguard"
+version = "0.1.0"
+description = "Open crash-detection model and reference implementation for phone, watch and bike motion sensors"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.9"
+dependencies = ["numpy"]
+keywords = ["crash detection", "accident detection", "accelerometer", "imu", "safety", "two-wheeler"]
+
+[project.urls]
+Homepage = "https://github.com/NISTALTALSON/crashguard"
+
+[tool.setuptools]
+packages = ["crashguard"]
+
+[tool.setuptools.package-data]
+crashguard = ["data/crash_model.json"]

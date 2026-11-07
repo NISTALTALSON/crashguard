@@ -8,7 +8,7 @@ event comes from a scenario TYPE the model never saw during training. That is fa
 harder (and closer to the real world, where new situations keep showing up) than a
 random split. The random-split number is reported too, only for comparison.
 
-Outputs: model/crash_model.json, model/parity.json, ../android/shared-assets/crash_model.json,
+Outputs: model/crash_model.json, model/parity.json, ../examples/android/shared-assets/, ../crashguard/data/,
          ../js/crash_model.json, REPORT.md
 """
 import json
@@ -108,7 +108,7 @@ def main():
     )
     blob = json.dumps(model)
     (OUT / "crash_model.json").write_text(blob)
-    for dest in (HERE.parent / "android" / "shared-assets", HERE.parent / "js"):
+    for dest in (HERE.parent / "examples" / "android" / "shared-assets", HERE.parent / "js", HERE.parent / "crashguard" / "data"):
         dest.mkdir(parents=True, exist_ok=True)
         (dest / "crash_model.json").write_text(blob)
 

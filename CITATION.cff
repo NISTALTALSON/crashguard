@@ -1,0 +1,12 @@
+﻿cff-version: 1.2.0
+message: "If you use CrashGuard, please cite it."
+title: "CrashGuard: an open crash-detection model for motion sensors"
+type: software
+authors:
+  - alias: "Nistal"
+    website: "https://github.com/NISTALTALSON"
+repository-code: "https://github.com/NISTALTALSON/crashguard"
+license: MIT
+version: 0.1.0
+date-released: "2026-11-07"
+keywords: [crash detection, accident detection, accelerometer, imu, two-wheeler, safety]

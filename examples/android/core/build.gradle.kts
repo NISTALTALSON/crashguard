@@ -14,5 +14,6 @@ dependencies {
 tasks.test {
     useJUnit()
     systemProperty("model.path", rootProject.file("shared-assets/crash_model.json").absolutePath)
-    systemProperty("parity.path", rootProject.file("../ml/model/parity.json").absolutePath)
+    systemProperty("parity.path", rootProject.file("../../ml/model/parity.json").absolutePath)
 }
+

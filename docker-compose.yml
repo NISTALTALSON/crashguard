@@ -1,6 +1,6 @@
 services:
   crashguard:
-    build: ./backend
+    build: ./examples/backend
     ports: ["8000:8000"]
     environment:
       CRASHGUARD_API_KEY: ${CRASHGUARD_API_KEY:-changeme}
@@ -9,3 +9,4 @@ services:
       TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-}
       TWILIO_FROM: ${TWILIO_FROM:-}
     restart: unless-stopped
+

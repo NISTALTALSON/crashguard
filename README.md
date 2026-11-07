@@ -1,129 +1,98 @@
-﻿# CrashGuard
+# CrashGuard
 
-**Open-source automatic crash detection. When a crash happens, your phone or watch counts down, then alerts your emergency contacts with your live location and calls 112 for you.**
-
-Built for the people Apple's and Google's crash detection mostly isn't tuned for: **two-wheeler riders, cyclists, auto-rickshaw passengers and anyone on a mid-range Android phone**, starting with India.
+**An open, tiny (88 KB) crash-detection model for motion sensors: phone, watch, handlebar or helmet. Take it, port it, improve it, build whatever you want on top.**
 
 [![CI](https://github.com/NISTALTALSON/crashguard/actions/workflows/ci.yml/badge.svg)](https://github.com/NISTALTALSON/crashguard/actions)
-![license](https://img.shields.io/badge/license-MIT-blue)
+![license](https://img.shields.io/badge/code%20%26%20weights-MIT-blue)
+![status](https://img.shields.io/badge/status-v0.1%20research%20preview-orange)
 
-> **Status: v0.1, pre-field-testing.** The detection model is trained on *simulated* crashes layered on real sensor noise (there is no public dataset of real phone-sensor crashes). Read [Honest accuracy](#honest-accuracy) before trusting it with your life. The app starts in **TEST MODE**: it never calls or texts anyone until you turn that off.
+This repo is a **model and a spec**, not an app or a product. It gives you:
 
----
+- 📦 a trained classifier (`crash_model.json`, plain JSON weights, no ML framework needed to run it)
+- 🧮 reference code in **Python**, **JavaScript** and **Kotlin** that all produce identical outputs
+- 🧪 the simulator and training pipeline, so you can retrain or extend it
+- 📐 a language-neutral [spec](docs/SPEC.md) so anyone can port it to Swift, Dart, Rust, C for microcontrollers, etc.
+- 🔌 two *example* integrations (Android + Wear OS app, escalation backend) showing one way to use it
+
+> ⚠️ **Research preview. Not a certified safety device.** The model is trained on *simulated* crashes layered on real sensor noise because no public dataset of real phone-sensor crashes exists. Read the [Model Card](MODEL_CARD.md) before using it in anything that matters. The best way to improve it is [contributing real data](CONTRIBUTING.md).
+
+## Use it in 10 lines
+
+```bash
+pip install git+https://github.com/NISTALTALSON/crashguard
+```
+```python
+from crashguard import Model, CrashDetector
+
+model = Model.load()                              # bundled 88 KB model
+detector = CrashDetector(model, on_evaluated=lambda e: print(
+    f"impact! p(crash)={e.probability:.2f} peak={e.peak_g:.1f}g crash={e.positive}"))
+
+# feed your sensor stream (any rate >= ~100 Hz works; it decimates to 50 Hz internally)
+detector.on_gyroscope(gx, gy, gz)                 # rad/s
+detector.on_accelerometer(t, ax, ay, az)          # m/s^2 incl. gravity, t in seconds
+detector.on_speed(t, gps_speed_mps)               # optional, but it helps a lot
+detector.tick(t)                                  # ~1 Hz
+```
+Or classify a single pre-cut window: `model.predict(acc_128x3_in_g, gyr_128x3, v_pre, v_post, gps_ok)`.
+
+JavaScript (browser, React Native, Node, Raspberry Pi): see [`js/`](js). Kotlin / Android / Wear OS: see [`examples/android`](examples/android).
 
 ## How it works
 
 ```
- sensors (200 Hz)                                        you have 30 s to cancel
-â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”   â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”   â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”   â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”   â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
-â”‚ accel + gyro   â”‚â”€â”€â–¶â”‚ 1 TRIGGER   â”‚â”€â”€â–¶â”‚ 2 CLASSIFIER â”‚â”€â”€â–¶â”‚ 3 COUNTDOWN   â”‚â”€â”€â–¶â”‚ 4 ESCALATE             â”‚
-â”‚ + GPS speed    â”‚   â”‚ |a| >= 3.5 gâ”‚   â”‚ 21 features  â”‚   â”‚ phone + watch â”‚   â”‚ SMS contacts, call 112,â”‚
-â”‚ (peak-hold 50Hz)â”‚  â”‚ (cheap gate)â”‚   â”‚ MLP, 5 s ctx â”‚   â”‚ vibrate, big  â”‚   â”‚ backend calls contacts â”‚
-â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜   â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜   â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜   â”‚ "I'M OK" btn  â”‚   â”‚ in order + live link   â”‚
-                                                          â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜   â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
+sensors ──▶ peak-hold 50 Hz ──▶ TRIGGER |a| ≥ 3.5 g ──▶ 2.56 s window + GPS speed context ──▶ 21 features ──▶ MLP ──▶ p(crash)
 ```
 
-1. **Trigger.** Normal life almost never produces 3.5 g. On 7.3 hours of real everyday-activity data, it fired **0 times**.
-2. **Classifier.** The 2.56 s window around the impact plus GPS speed 6 s before and 3-5 s after (did the vehicle actually stop?) goes through a small neural net. It is trained to tell a crash from a **dropped phone, pothole, speed bump, door slam, roller coaster, sports impact, train jolt**, and so on.
-3. **Countdown.** Full-screen alert, vibration, and a haptic countdown on a paired watch. One huge cancel button.
-4. **Escalation.** The phone texts your contacts directly (works offline), calls the emergency number, and (optional) a backend keeps calling your contacts one by one until someone acknowledges, with a live-location page.
+1. **Trigger gate.** Everyday life almost never reaches 3.5 g: on 7.3 h of real activity data it fired **0 times**.
+2. **Window.** 2.56 s around the impact, plus GPS speed in the 6 s before and 3 to 5 s after (did the vehicle actually stop?).
+3. **Features.** 21 hand-built, orientation-independent features: peak, jerk, free-fall before impact, bounce count, rotation, post-impact stillness, speed drop, and so on ([full list](docs/SPEC.md#features)).
+4. **Classifier.** A small MLP (64-32-16) outputs a crash probability. A threshold (0.859 in v0.1) turns it into a decision.
 
-## What's in the repo
-
-| Folder | What | Verified here |
-|---|---|---|
-| [`ml/`](ml) | Data fetch, physics simulator, feature extraction, training, evaluation ([REPORT.md](ml/REPORT.md)) | Ran end to end |
-| [`backend/`](backend) | FastAPI escalation service (Twilio or console), live tracking page, Docker | 6 tests pass |
-| [`js/`](js) | Dependency-free JS core: features + model + streaming detector | Parity-tested against Python, replay-tested |
-| [`android/core`](android/core) | Same core in Kotlin (pure JVM, shared by phone and watch) | Written, **not compiled yet** |
-| [`android/app`](android/app) | Phone app: foreground service, countdown UI, SMS, 112 call, backend client, event logger | Written, **not compiled yet** |
-| [`android/wear`](android/wear) | Wear OS app: on-wrist detection, haptic countdown, cancel from the watch | Written, **not compiled yet** |
-
-## Runs on what?
-
-| Platform | Support |
-|---|---|
-| **Android phones** (8.0+) | Full app (this repo) |
-| **Wear OS watches** (3+) | Full app, detects on the wrist and mirrors the countdown |
-| **Anything that runs JavaScript** (browser, React Native, Capacitor, Node on a Raspberry Pi, Electron) | `js/` core, same model |
-| **Python** (bike computers, Raspberry Pi, servers, research) | `ml/features.py` is the reference implementation |
-| **iOS / Apple Watch** | Native background crash sensing isn't open to third-party apps. The JS core works in a foreground app only. Honest limitation, not a roadmap promise. |
-
-One model file ([`ml/model/crash_model.json`](ml/model/crash_model.json), 86 KB) feeds all of them, and parity tests keep every implementation identical.
+The classifier is trained to tell a crash from the things that fool naive detectors: **dropped phone, pothole, speed bump, door slam, roller coaster, sports impact, train jolt, parking tap**. Scenarios include cars, rollovers, motorcycles (high-side and low-side), scooters, bicycles, auto-rickshaws and pedestrian hits.
 
 ## Honest accuracy
 
-From [`ml/REPORT.md`](ml/REPORT.md) (23 scenario types, 23,000 simulated events layered on the real UCI HAR dataset):
+Full details in [`ml/REPORT.md`](ml/REPORT.md) and the [Model Card](MODEL_CARD.md).
 
 | Test | Crash recall | False alarms |
 |---|---|---|
-| **Scenario-held-out** (test scenarios *never seen* in training), 6-fold | **93.4%** | **1.0%** |
-| Random split (same scenarios in train/test, optimistic) | 97.2% | 0.12% |
-| Real everyday activity, 7.3 h | n/a | **0 trigger events** |
+| **Scenario-held-out** (test scenarios never seen in training), 6-fold | **93.4%** | **1.0%** |
+| Random split (same scenarios in train and test, optimistic) | 97.2% | 0.12% |
+| Real everyday activity, 7.3 h (UCI HAR) | n/a | **0 trigger events** |
 
-Read this carefully:
+These are **simulated** crashes, so they show the model separates scenario families under my physics assumptions. They are **not** a real-world accuracy claim. Weakest cases: pedestrian hits (71%) and frontal car crashes (89%) when held out. Many phones saturate at ±8 g or ±16 g; the simulator models that.
 
-- These are **simulated** crashes. The numbers show the model separates scenario families under my physics assumptions. They are **not** a real-world accuracy claim and not proof it beats Apple.
-- Apple's detection uses a dedicated high-g sensor and data from real crashes. Many Android phones saturate at **Â±8 g / Â±16 g**, so some severe impacts are clipped (the simulator models this). The classifier leans on rotation, post-impact stillness and GPS speed instead of peak g alone.
-- Weakest spots: pedestrian hits (71%) and car frontal crashes (89%) when held out.
-- **False alarms are the real enemy.** That's why there's a countdown and a one-tap cancel.
+## Repo map
 
-The way to make this *actually* good is field data. The app saves every trigger with its raw sensor window and labels it when you cancel; send those back and retrain with `ml/train.py`.
+| Path | What |
+|---|---|
+| [`crashguard/`](crashguard) | pip-installable Python package: features, model, streaming detector |
+| [`js/`](js) | dependency-free JS port (`npm test` checks parity with Python) |
+| [`ml/`](ml) | data fetch, physics simulator, training, evaluation, exported model + parity vectors |
+| [`docs/SPEC.md`](docs/SPEC.md) | exact algorithm spec for porting |
+| [`docs/DATA_FORMAT.md`](docs/DATA_FORMAT.md) | event format for contributing real data |
+| [`examples/android`](examples/android) | example Android + Wear OS app (Kotlin; **not yet compiled or device-tested**) |
+| [`examples/backend`](examples/backend) | example FastAPI contact-escalation service (6 tests pass) |
 
-## Quick start
+## Retrain / extend
 
-### Model + tests (Python)
 ```bash
-cd ml && pip install -r requirements.txt
-python fetch_data.py        # downloads UCI HAR (61 MB)
-python train.py             # simulate, select model, export, write REPORT.md (~20 min)
+pip install -e . scikit-learn pandas scipy
+cd ml && python fetch_data.py && python train.py   # ~20 min, rewrites model + REPORT.md + exports for every port
 ```
+Add a scenario in `ml/simulate.py`, retrain, and the report shows how it generalises.
 
-### Backend
-```bash
-cd backend && pip install -r requirements.txt
-python -m pytest -q
-CRASHGUARD_API_KEY=changeme BASE_URL=https://your.host uvicorn app:app --host 0.0.0.0
-# optional real calls/SMS: TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM
-docker compose up           # or run it in Docker
-```
-Server calls reach your **contacts** only. Carriers don't let a server place a 112 call for you, so the **phone** places that call itself.
+## Contribute
 
-### JavaScript
-```js
-const { Model, CrashDetector } = require('./js/crashguard-core');
-const model = new Model(require('./js/crash_model.json'));
-const d = new CrashDetector(model, (e) => e.positive && startCountdown(e));
-window.addEventListener('devicemotion', (ev) => {
-  const a = ev.accelerationIncludingGravity;
-  d.onAccelerometer(performance.now(), a.x, a.y, a.z);
-});
-setInterval(() => d.tick(performance.now()), 1000);
-```
-`cd js && npm test`
+The most valuable thing is **real data** (safe, consented, anonymised) in the [standard format](docs/DATA_FORMAT.md). Also welcome: ports (Swift, Dart, Rust, C), better scenarios, field evaluations. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
-### Android + Wear OS
-Open `android/` in Android Studio (JDK 17), run **app** on a phone and **wear** on a paired watch. In the app: grant permissions, add 1-3 contacts, tap **Save & start**, then **Simulate a crash** (never calls anyone). Turn off TEST MODE only when you're ready for real alerts.
-JVM tests for the core: `gradle :core:test`.
+## Safety and legal
 
-## Safety, privacy, limits
+- Not a certified safety or medical device. No warranty (MIT).
+- Never test with real emergency calls. Check your local rules before automating them.
+- If you build a product on this, you own its false-alarm and missed-detection risk. Test it, keep a human-cancel step, and don't make it someone's only safety measure.
 
-- **TEST MODE is on by default.** No real SMS or calls until you disable it.
-- Always-on sensing costs battery (foreground service + wake lock). Smarter duty-cycling (only while riding/driving) is on the roadmap.
-- Google Play restricts SMS and call permissions; expect to ship via direct APK / F-Droid or file a permissions declaration.
-- Android 14+ doesn't let a location foreground service auto-start at boot, so open the app once after a reboot.
-- Dialing 112 automatically may have local legal/operational rules. Check yours. Never test by placing real emergency calls.
-- Location and contacts stay on the device unless you configure your own backend. There is no analytics and no cloud.
-- This is not a certified safety device. Don't rely on it as your only safety measure.
+## Credits and license
 
-## Roadmap
-- [ ] Field data collection campaign (two-wheeler riders) and retraining on real crashes
-- [ ] Compile and device-test Android + Wear apps; publish APK
-- [ ] Activity recognition gate (monitor only when riding/driving) to cut battery use
-- [ ] 112 India app / ERSS SMS integration per state
-- [ ] Post-impact "are you responsive?" voice check
-- [ ] Crash-severity estimate for responders
-
-## License
-MIT
-
+Code and model weights: **MIT**. Sensor texture comes from the UCI HAR dataset (CC BY 4.0): Anguita, Ghio, Oneto, Parra, Reyes-Ortiz, *A Public Domain Dataset for Human Activity Recognition Using Smartphones*, ESANN 2013. If you use CrashGuard, see [CITATION.cff](CITATION.cff).
